@@ -1,0 +1,13 @@
+{
+  "name": "pokemono-online",
+  "version": "1.0.0",
+  "description": "Monster Battle & Trade Online Game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  }
+}

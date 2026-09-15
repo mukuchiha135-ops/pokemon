@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokemono Online</title>
+    <!-- Phaser 3 -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #030712;
+            color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        #game-container {
+            border: 3px solid #06b6d4;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(6, 182, 212, 0.4);
+        }
+        .instructions {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #94a3b8;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container"></div>
+    <div class="instructions">
+        【操作】 矢印キー: 移動 | SPACE: 無料回復 | Mキー: メニュー
+    </div>
+
+<script>
+// ====================================================
+// 1. 定数・グローバル変数
+// ====================================================
+const socket = io();
+let onlineUsersCount = 1;
+let currentRoomId = null;
+
+const BIOMES = [
+    { id: 0, name: "平原", color: 0x16a34a, encounters: [{ name: "スラリン", color: 0x3b82f6 }, { name: "野ウサギ", color: 0xf87171 }] },
+    { id: 1, name: "深緑の森", color: 0x065f46, encounters: [{ name: "フォレストリザード", color: 0x10b981 }, { name: "ウッドゴーレム", color: 0x854d0e }] },
+    { id: 2, name: "灼熱の砂漠", color: 0xd97706, encounters: [{ name: "スコーピオン", color: 0xef4444 }, { name: "サンドワーム", color: 0xf59e0b }] },
+    { id: 3, name: "極寒の氷原", color: 0x0284c7, encounters: [{ name: "アイスウルフ", color: 0x38bdf8 }, { name: "フロストゴーレム", color: 0x93c5fd }] },
+    { id: 4, name: "暗黒の洞窟", color: 0x334155, encounters: [{ name: "シャドウバット", color: 0x64748b }, { name: "ダークウルフ", color: 0x1e293b }] },
+    { id: 5, name: "雷鳴の荒野", color: 0xca8a04, encounters: [{ name: "ボルトホーク", color: 0xfacc15 }, { name: "スパークタイガー", color: 0xeab308 }] },
+    { id: 6, name: "毒の沼地", color: 0x7e22ce, encounters: [{ name: "ポイズンスネーク", color: 0xa855f7 }, { name: "ミズムシ", color: 0xc084fc }] },
+    { id: 7, name: "古代遺跡", color: 0x78350f, encounters: [{ name: "ストーンガーディアン", color: 0xd97706 }, { name: "ミミック", color: 0xf97316 }] },
+    { id: 8, name: "天空の回廊", color: 0x0284c7, encounters: [{ name: "スカイイーグル", color: 0x7dd3fc }, { name: "ワイバーン", color: 0x06b6d4 }] },
+    { id: 9, name: "魔王の城郭", color: 0x881337, encounters: [{ name: "ナイトメア", color: 0xe11d48 }, { name: "ヘルハウンド", color: 0x9f1239 }] }
+];
+
+const SAVE_KEY = "POKEMONO_ONLINE_SAVE";
+const defaultPlayerData = {
+    mook: 1000,
+    party: [
+        { name: "フェンリル", level: 10, hp: 60, maxHp: 60, atk: 20, color: 0x38bdf8, exp: 0 }
+    ],
+    box: []
+};
+
+let playerData = JSON.parse(JSON.stringify(defaultPlayerData));
+
+function loadSaveData() {
+    const data = localStorage.getItem(SAVE_KEY);
+    if (data) playerData = JSON.parse(data);
+}
+function autoSave() {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(playerData));
+}
+
+// 通信イベント受信
+socket.on('onlineCount', (count) => {
+    onlineUsersCount = count;
+});
+
+socket.on('errorMsg', (msg) => {
+    alert("エラー: " + msg);
+});
+
+// ====================================================
+// 2. シーン: タイトル
+// ====================================================
+class TitleScene extends Phaser.Scene {
+    constructor() { super({ key: 'TitleScene' }); }
+
+    create() {
+        loadSaveData();
+        const cx = 256;
+        this.add.rectangle(256, 192, 512, 384, 0x070a13);
+        
+        this.add.text(cx, 70, "POKEMONO ONLINE", { font: 'bold 24px sans-serif', fill: '#38bdf8' }).setOrigin(0.5);
+        this.countText = this.add.text(cx, 110, `同時接続人数: ${onlineUsersCount} 人`, { font: '12px sans-serif', fill: '#facc15' }).setOrigin(0.5);
+
+        this.createBtn(cx, 180, "冒険をはじめる", () => this.scene.start('WorldScene'));
+        this.createBtn(cx, 230, "オンラインロビー", () => this.scene.start('OnlineLobbyScene'));
+        this.createBtn(cx, 280, "データ初期化", () => {
+            localStorage.removeItem(SAVE_KEY);
+            playerData = JSON.parse(JSON.stringify(defaultPlayerData));
+            alert("初期化しました。");
+        });
+    }
+
+    update() {
+        if (this.countText) this.countText.setText(`同時接続人数: ${onlineUsersCount} 人`);
+    }
+
+    createBtn(x, y, label, cb) {
+        const bg = this.add.rectangle(x, y, 180, 34, 0x0f172a).setInteractive().setStrokeStyle(2, 0x38bdf8);
+        this.add.text(x, y, label, { font: 'bold 12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+        bg.on('pointerdown', cb);
+    }
+}
+
+// ====================================================
+// 3. シーン: ワールド
+// ====================================================
+class WorldScene extends Phaser.Scene {
+    constructor() { super({ key: 'WorldScene' }); }
+
+    preload() {
+        const g = this.make.graphics({ x: 0, y: 0, add: false });
+        g.fillStyle(0x38bdf8);
+        g.fillRoundedRect(2, 2, 28, 28, 6);
+        g.generateTexture('player', 32, 32);
+        g.clear();
+
+        g.fillStyle(0x22c55e);
+        g.fillCircle(16, 16, 14);
+        g.generateTexture('healer', 32, 32);
+        g.clear();
+    }
+
+    create() {
+        this.currentBiomeIndex = 0;
+        this.createBiomeMap();
+
+        this.player = this.physics.add.sprite(256, 192, 'player').setCollideWorldBounds(true);
+        this.healer = this.add.image(256, 60, 'healer');
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        this.menuKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+
+        this.uiText = this.add.text(10, 10, "", { font: '11px sans-serif', fill: '#fff', backgroundColor: '#000000aa', padding: { x: 6, y: 4 } });
+        this.updateUI();
+    }
+
+    createBiomeMap() {
+        this.cameras.main.setBackgroundColor(BIOMES[this.currentBiomeIndex].color);
+    }
+
+    updateUI() {
+        this.uiText.setText(`同接続: ${onlineUsersCount}人 | 場所: ${BIOMES[this.currentBiomeIndex].name} | ${playerData.mook} M`);
+    }
+
+    update() {
+        if (Phaser.Input.Keyboard.JustDown(this.menuKey)) {
+            this.scene.start('MenuScene');
+            return;
+        }
+
+        let speed = 140;
+        this.player.setVelocity(0);
+        let moved = false;
+
+        if (this.cursors.left.isDown) { this.player.setVelocityX(-speed); moved = true; }
+        else if (this.cursors.right.isDown) { this.player.setVelocityX(speed); moved = true; }
+        else if (this.cursors.up.isDown) { this.player.setVelocityY(-speed); moved = true; }
+        else if (this.cursors.down.isDown) { this.player.setVelocityY(speed); moved = true; }
+
+        if (moved) {
+            if (this.player.x > 500 && this.currentBiomeIndex < BIOMES.length - 1) {
+                this.currentBiomeIndex++; this.player.x = 20; this.createBiomeMap(); this.updateUI();
+            } else if (this.player.x < 10 && this.currentBiomeIndex > 0) {
+                this.currentBiomeIndex--; this.player.x = 490; this.createBiomeMap(); this.updateUI();
+            }
+
+            if (Phaser.Math.Between(1, 120) === 1) {
+                const biome = BIOMES[this.currentBiomeIndex];
+                const enc = Phaser.Utils.Array.GetRandom(biome.encounters);
+                let lvl = Math.min(150, (this.currentBiomeIndex + 1) * 12);
+                this.scene.start('BattleScene', {
+                    enemy: { name: enc.name, level: lvl, hp: lvl*8+20, maxHp: lvl*8+20, atk: lvl*2+5, color: enc.color }
+                });
+            }
+        }
+
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+            if (Phaser.Math.Distance.Between(this.player.x, this.player.y, this.healer.x, this.healer.y) < 40) {
+                playerData.party.forEach(m => m.hp = m.maxHp);
+                autoSave();
+                alert("完全回復しました！");
+            }
+        }
+    }
+}
+
+// ====================================================
+// 4. シーン: オンラインロビー
+// ====================================================
+class OnlineLobbyScene extends Phaser.Scene {
+    constructor() { super({ key: 'OnlineLobbyScene' }); }
+
+    create() {
+        this.add.rectangle(256, 192, 512, 384, 0x0f172a);
+        this.add.text(20, 20, "オンラインロビー", { font: 'bold 18px sans-serif', fill: '#38bdf8' });
+
+        this.createBtn(140, 120, "対戦部屋を作成/入室", () => this.joinRoom('battle'));
+        this.createBtn(360, 120, "交換部屋を作成/入室", () => this.joinRoom('trade'));
+
+        const backBtn = this.add.rectangle(256, 320, 100, 30, 0x334155).setInteractive();
+        this.add.text(256, 320, "戻る", { font: '12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+        backBtn.on('pointerdown', () => this.scene.start('TitleScene'));
+
+        // 相手マッチング成功受信
+        socket.off('roomReady');
+        socket.on('roomReady', (data) => {
+            currentRoomId = data.roomId;
+            if (data.mode === 'trade') {
+                // 交換の提案を自動送信
+                socket.emit('proposeTrade', { roomId: currentRoomId, offerMon: playerData.party[0] });
+                alert("相手とマッチングしました！交換処理を実行中...");
+            } else if (data.mode === 'battle') {
+                alert("対戦相手とマッチングしました！対戦を開始します。");
+                this.scene.start('OnlineBattleScene', { roomData: data });
+            }
+        });
+
+        // 交換完了受信
+        socket.off('tradeComplete');
+        socket.on('tradeComplete', ({ receivedMon }) => {
+            playerData.party[0] = receivedMon;
+            autoSave();
+            alert(`交換完了！ ${receivedMon.name} (Lv.${receivedMon.level}) を受け取りました！`);
+            this.scene.start('WorldScene');
+        });
+    }
+
+    createBtn(x, y, label, cb) {
+        const bg = this.add.rectangle(x, y, 180, 36, 0x0284c7).setInteractive();
+        this.add.text(x, y, label, { font: 'bold 12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+        bg.on('pointerdown', cb);
+    }
+
+    joinRoom(mode) {
+        let roomId = prompt("部屋ID（合言葉）を入力してください:");
+        if (!roomId) return;
+        socket.emit('joinRoom', { roomId: roomId, mode: mode, playerParty: playerData.party });
+    }
+}
+
+// ====================================================
+// 5. シーン: オンライン対戦
+// ====================================================
+class OnlineBattleScene extends Phaser.Scene {
+    constructor() { super({ key: 'OnlineBattleScene' }); }
+
+    init(data) {
+        this.roomData = data.roomData;
+        this.myMon = playerData.party[0];
+        
+        // 相手モンスター情報の取得
+        const enemyPlayer = this.roomData.players.find(p => p.id !== socket.id);
+        this.enemyMon = enemyPlayer ? enemyPlayer.activeMon : { name: "対戦相手", level: 10, hp: 50, maxHp: 50, color: 0xef4444 };
+    }
+
+    create() {
+        this.add.rectangle(256, 192, 512, 384, 0x030712);
+
+        this.enemySprite = this.add.circle(380, 100, 32, this.enemyMon.color || 0xef4444);
+        this.playerSprite = this.add.circle(130, 200, 30, this.myMon.color || 0x38bdf8);
+
+        this.enemyText = this.add.text(20, 20, `${this.enemyMon.name} Lv.${this.enemyMon.level}\nHP: ${this.enemyMon.hp}/${this.enemyMon.maxHp}`, { font: '13px sans-serif', fill: '#f87171' });
+        this.playerText = this.add.text(260, 160, `${this.myMon.name} Lv.${this.myMon.level}\nHP: ${this.myMon.hp}/${this.myMon.maxHp}`, { font: '13px sans-serif', fill: '#38bdf8' });
+
+        this.logText = this.add.text(20, 270, "オンライン対戦開始！", { font: '12px sans-serif', fill: '#facc15' });
+
+        let attackBtn = this.add.rectangle(256, 330, 120, 32, 0x1e293b).setInteractive().setStrokeStyle(1, 0x38bdf8);
+        this.add.text(256, 330, "攻撃する", { font: '12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+
+        attackBtn.on('pointerdown', () => {
+            socket.emit('battleAttack', { roomId: currentRoomId });
+        });
+
+        // サーバー計算ターン結果受信
+        socket.off('battleTurnResult');
+        socket.on('battleTurnResult', (result) => {
+            if (result.attackerId === socket.id) {
+                this.enemyMon.hp = result.defenderHp;
+                this.logText.setText(`あなたの攻撃！ ${result.damage} ダメージ与えた！`);
+            } else {
+                this.myMon.hp = result.defenderHp;
+                this.logText.setText(`相手の攻撃！ ${result.damage} ダメージ受けた！`);
+            }
+
+            this.enemyText.setText(`${this.enemyMon.name} Lv.${this.enemyMon.level}\nHP: ${this.enemyMon.hp}/${this.enemyMon.maxHp}`);
+            this.playerText.setText(`${this.myMon.name} Lv.${this.myMon.level}\nHP: ${this.myMon.hp}/${this.myMon.maxHp}`);
+
+            if (result.isDefenderFainted) {
+                if (result.attackerId === socket.id) {
+                    alert("勝利しました！");
+                } else {
+                    alert("敗北しました...");
+                }
+                autoSave();
+                this.scene.start('WorldScene');
+            }
+        });
+    }
+}
+
+// ====================================================
+// 6. オフラインバトル・メニュー
+// ====================================================
+class BattleScene extends Phaser.Scene {
+    constructor() { super({ key: 'BattleScene' }); }
+    init(data) { this.enemy = data.enemy; this.activeMon = playerData.party[0]; }
+    create() {
+        this.add.rectangle(256, 192, 512, 384, 0x030712);
+        this.add.circle(380, 100, 30, this.enemy.color);
+        this.add.circle(130, 200, 30, this.activeMon.color);
+        let btn = this.add.rectangle(256, 330, 100, 30, 0x1e293b).setInteractive();
+        this.add.text(256, 330, "攻撃", { font: '12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+        btn.on('pointerdown', () => {
+            alert("野生のモンスターを倒した！");
+            playerData.mook += 50;
+            autoSave();
+            this.scene.start('WorldScene');
+        });
+    }
+}
+
+class MenuScene extends Phaser.Scene {
+    constructor() { super({ key: 'MenuScene' }); }
+    create() {
+        this.add.rectangle(256, 192, 512, 384, 0x070a13);
+        this.add.text(20, 20, "パーティ確認", { font: '15px sans-serif', fill: '#38bdf8' });
+        playerData.party.forEach((m, i) => {
+            this.add.text(30, 60 + i * 30, `${i+1}. ${m.name} Lv.${m.level} (HP:${m.hp}/${m.maxHp})`, { font: '12px sans-serif', fill: '#fff' });
+        });
+        let closeBtn = this.add.rectangle(256, 330, 100, 30, 0x334155).setInteractive();
+        this.add.text(256, 330, "閉じる", { font: '12px sans-serif', fill: '#fff' }).setOrigin(0.5);
+        closeBtn.on('pointerdown', () => this.scene.start('WorldScene'));
+    }
+}
+
+// ====================================================
+// 7. 初期化
+// ====================================================
+const config = {
+    type: Phaser.AUTO,
+    width: 512,
+    height: 384,
+    parent: 'game-container',
+    physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
+    scene: [TitleScene, WorldScene, OnlineLobbyScene, OnlineBattleScene, BattleScene, MenuScene]
+};
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>
